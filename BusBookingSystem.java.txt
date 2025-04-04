@@ -1,0 +1,157 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.sql.*;
+
+public class BusBookingSystem extends JFrame {
+    private JTextField nameField, seatsField;
+    private JComboBox<String> busBox;
+    private JTextArea outputArea;
+
+    public BusBookingSystem() {
+        setTitle("Bus Ticket Booking System");
+        setSize(500, 400);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLayout(new FlowLayout());
+
+        add(new JLabel("Passenger Name:"));
+        nameField = new JTextField(15);
+        add(nameField);
+
+        add(new JLabel("Select Bus:"));
+        busBox = new JComboBox<>();
+        loadBuses();
+        add(busBox);
+
+        add(new JLabel("Seats:"));
+        seatsField = new JTextField(5);
+        add(seatsField);
+
+        JButton bookButton = new JButton("Book Ticket");
+        JButton viewButton = new JButton("View Buses");
+        JButton cancelButton = new JButton("Cancel Ticket");
+
+        add(bookButton);
+        add(viewButton);
+        add(cancelButton);
+
+        outputArea = new JTextArea(10, 40);
+        add(new JScrollPane(outputArea));
+
+        bookButton.addActionListener(e -> bookTicket());
+        viewButton.addActionListener(e -> viewBuses());
+        cancelButton.addActionListener(e -> cancelTicket());
+
+        setVisible(true);
+    }
+
+    private void loadBuses() {
+        try (Connection con = DriverManager.getConnection("jdbc:mysql://localhost:3306/BusBookingDB", "root", "password");
+             Statement stmt = con.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT bus_name FROM buses")) {
+
+            while (rs.next()) {
+                busBox.addItem(rs.getString("bus_name"));
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage());
+        }
+    }
+
+    private void bookTicket() {
+        String passengerName = nameField.getText();
+        String busName = (String) busBox.getSelectedItem();
+        int seats = Integer.parseInt(seatsField.getText());
+
+        try (Connection con = DriverManager.getConnection("jdbc:mysql://localhost:3306/BusBookingDB", "root", "password")) {
+            String sql = "SELECT id, price, seats_available FROM buses WHERE bus_name=?";
+            PreparedStatement pst = con.prepareStatement(sql);
+            pst.setString(1, busName);
+            ResultSet rs = pst.executeQuery();
+
+            if (rs.next()) {
+                int busId = rs.getInt("id");
+                double price = rs.getDouble("price");
+                int availableSeats = rs.getInt("seats_available");
+
+                if (seats > availableSeats) {
+                    outputArea.setText("Not enough seats available!");
+                } else {
+                    double totalPrice = price * seats;
+
+                    sql = "INSERT INTO tickets (passenger_name, bus_id, seats, total_price) VALUES (?, ?, ?, ?)";
+                    pst = con.prepareStatement(sql);
+                    pst.setString(1, passengerName);
+                    pst.setInt(2, busId);
+                    pst.setInt(3, seats);
+                    pst.setDouble(4, totalPrice);
+                    pst.executeUpdate();
+
+                    sql = "UPDATE buses SET seats_available=? WHERE id=?";
+                    pst = con.prepareStatement(sql);
+                    pst.setInt(1, availableSeats - seats);
+                    pst.setInt(2, busId);
+                    pst.executeUpdate();
+
+                    outputArea.setText("Ticket Booked Successfully!\nTotal Price: ₹" + totalPrice);
+                }
+            }
+        } catch (Exception ex) {
+            outputArea.setText("Error: " + ex.getMessage());
+        }
+    }
+
+    private void viewBuses() {
+        try (Connection con = DriverManager.getConnection("jdbc:mysql://localhost:3306/BusBookingDB", "root", "password");
+             Statement stmt = con.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT * FROM buses")) {
+
+            outputArea.setText("Available Buses:\n");
+            while (rs.next()) {
+                outputArea.append(rs.getString("bus_name") + " - " + rs.getString("source") + " to " +
+                        rs.getString("destination") + " - ₹" + rs.getDouble("price") +
+                        " - Seats: " + rs.getInt("seats_available") + "\n");
+            }
+        } catch (Exception ex) {
+            outputArea.setText("Error: " + ex.getMessage());
+        }
+    }
+
+    private void cancelTicket() {
+        String passengerName = JOptionPane.showInputDialog("Enter Passenger Name:");
+
+        try (Connection con = DriverManager.getConnection("jdbc:mysql://localhost:3306/BusBookingDB", "root", "password")) {
+            String sql = "SELECT tickets.id, tickets.seats, buses.id AS bus_id FROM tickets INNER JOIN buses ON tickets.bus_id = buses.id WHERE passenger_name=?";
+            PreparedStatement pst = con.prepareStatement(sql);
+            pst.setString(1, passengerName);
+            ResultSet rs = pst.executeQuery();
+
+            if (rs.next()) {
+                int ticketId = rs.getInt("id");
+                int seats = rs.getInt("seats");
+                int busId = rs.getInt("bus_id");
+
+                sql = "DELETE FROM tickets WHERE id=?";
+                pst = con.prepareStatement(sql);
+                pst.setInt(1, ticketId);
+                pst.executeUpdate();
+
+                sql = "UPDATE buses SET seats_available = seats_available + ? WHERE id=?";
+                pst = con.prepareStatement(sql);
+                pst.setInt(1, seats);
+                pst.setInt(2, busId);
+                pst.executeUpdate();
+
+                outputArea.setText("Ticket Cancelled Successfully!");
+            } else {
+                outputArea.setText("Ticket Not Found!");
+            }
+        } catch (Exception ex) {
+            outputArea.setText("Error: " + ex.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        new BusBookingSystem();
+    }
+}
